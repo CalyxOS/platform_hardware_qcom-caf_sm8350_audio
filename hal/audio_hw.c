@@ -33,6 +33,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #define LOG_TAG "audio_hw_primary"
@@ -1624,6 +1626,7 @@ int enable_snd_device(struct audio_device *adev,
          audio_extn_spkr_prot_calib_cancel(adev);
 
     audio_extn_dsm_feedback_enable(adev, snd_device, true);
+    amplifier_enable_devices(snd_device, true);
 
     if (platform_can_enable_spkr_prot_on_device(snd_device) &&
          audio_extn_spkr_prot_is_enabled()) {
@@ -1631,7 +1634,6 @@ int enable_snd_device(struct audio_device *adev,
             goto err;
         }
         audio_extn_dev_arbi_acquire(snd_device);
-        amplifier_enable_devices(snd_device, true);
         if (audio_extn_spkr_prot_start_processing(snd_device)) {
             ALOGE("%s: spkr_start_processing failed", __func__);
             audio_extn_dev_arbi_release(snd_device);
@@ -1769,6 +1771,7 @@ int disable_snd_device(struct audio_device *adev,
         ALOGD("%s: snd_device(%d: %s)", __func__, snd_device, device_name);
 
         audio_extn_dsm_feedback_enable(adev, snd_device, false);
+        amplifier_enable_devices(snd_device, false);
 
         if (platform_can_enable_spkr_prot_on_device(snd_device) &&
              audio_extn_spkr_prot_is_enabled()) {
@@ -1787,7 +1790,6 @@ int disable_snd_device(struct audio_device *adev,
             platform_set_speaker_gain_in_combo(adev, snd_device, false);
         } else {
             audio_route_reset_and_update_path(adev->audio_route, device_name);
-            amplifier_enable_devices(snd_device, false);
         }
 
         if (snd_device == SND_DEVICE_OUT_BT_A2DP) {
@@ -1915,7 +1917,7 @@ static snd_device_t derive_playback_snd_device(void * platform,
 
     snd_device_t d1 = uc->out_snd_device;
     snd_device_t d2 = new_snd_device;
-    snd_device_t ret = 0;
+    int ret = 0;
 
     list_init(&a1);
     list_init(&a2);
@@ -1936,7 +1938,7 @@ static snd_device_t derive_playback_snd_device(void * platform,
          compare_devices_for_any_match(&a1 ,&a2)) {
         snd_device_t d3[2];
         int num_devices = 0;
-        int ret = platform_split_snd_device(platform,
+        ret = platform_split_snd_device(platform,
                                             list_length(&a1) > 1 ? d1 : d2,
                                             &num_devices,
                                             d3);
@@ -1981,9 +1983,6 @@ static snd_device_t derive_playback_snd_device(void * platform,
             goto end; // case 6, 3
         }
     }
-
-    clear_devices(&a1);
-    clear_devices(&a2);
 
 end:
     clear_devices(&a1);
@@ -3658,7 +3657,7 @@ int start_input_stream(struct stream_in *in)
             in->pcm = NULL;
             goto error_open;
         }
-        if (in->flags == AUDIO_INPUT_FLAG_FAST)
+        if (in->flags  & (AUDIO_INPUT_FLAG_FAST | AUDIO_INPUT_FLAG_RAW))
             register_in_stream(in);
         if (in->realtime) {
             ATRACE_BEGIN("pcm_in_start");
@@ -4518,7 +4517,7 @@ int start_output_stream(struct stream_out *out)
     }
 
     if (ret == 0) {
-        if (out->flags == AUDIO_OUTPUT_FLAG_FAST)
+        if (out->flags & (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_RAW))
             register_out_stream(out);
         if (out->realtime) {
             if (out->pcm == NULL || !pcm_is_ready(out->pcm)) {
@@ -7208,7 +7207,7 @@ static size_t in_get_buffer_size(const struct audio_stream *stream)
     if(in->usecase == USECASE_COMPRESS_VOIP_CALL)
         return voice_extn_compress_voip_in_get_buffer_size(in);
     else if(audio_extn_compr_cap_usecase_supported(in->usecase))
-        return audio_extn_compr_cap_get_buffer_size(in->config.format);
+        return audio_extn_compr_cap_get_buffer_size(pcm_format_to_audio_format(in->config.format));
     else if(audio_extn_cin_attached_usecase(in))
         return audio_extn_cin_get_buffer_size(in);
 
@@ -7669,7 +7668,9 @@ static ssize_t in_read(struct audio_stream_in *stream, void *buffer,
     if ((ret == 0 && voice_get_mic_mute(adev) &&
          !voice_is_in_call_rec_stream(in) &&
          (in->usecase != USECASE_AUDIO_RECORD_AFE_PROXY &&
-          in->usecase != USECASE_AUDIO_RECORD_AFE_PROXY2)) ||
+          in->usecase != USECASE_AUDIO_RECORD_AFE_PROXY2 &&
+          in->source != AUDIO_SOURCE_FM_TUNER &&
+          !is_single_device_type_equal(&in->device_list, AUDIO_DEVICE_IN_FM_TUNER))) ||
         (adev->num_va_sessions &&
          in->source != AUDIO_SOURCE_VOICE_RECOGNITION &&
          property_get_bool("persist.vendor.audio.va_concurrency_mute_enabled",
@@ -10381,7 +10382,7 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     }
 
     if (audio_extn_compr_cap_enabled() &&
-            audio_extn_compr_cap_format_supported(in->config.format))
+            audio_extn_compr_cap_format_supported(pcm_format_to_audio_format((in->config).format)))
         audio_extn_compr_cap_deinit();
 
     if (audio_extn_cin_attached_usecase(in))
