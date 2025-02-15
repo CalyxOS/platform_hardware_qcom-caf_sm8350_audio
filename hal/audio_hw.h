@@ -639,6 +639,12 @@ struct stream_in {
     simple_stats_t start_latency_ms;
 
     int car_audio_stream; /* handle for car_audio_stream*/
+
+    void** lvacfs_handle;
+    pthread_mutex_t lvacfs_lock;
+
+    void** lvimfs_handle;
+    pthread_mutex_t lvimfs_lock;
 };
 
 typedef enum {

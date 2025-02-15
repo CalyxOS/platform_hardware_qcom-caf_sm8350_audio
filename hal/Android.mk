@@ -167,6 +167,8 @@ endif
 
 LOCAL_SRC_FILES := \
     audio_hw.c \
+    audio_hw_lvacfs.c \
+    audio_hw_lvimfs.c \
     acdb.c \
     platform_info.c \
     $(AUDIO_PLATFORM)/platform.c \
@@ -438,6 +440,10 @@ ifeq ($(strip $(AUDIO_FEATURE_ENABLED_GCOV)),true)
 endif
 
 LOCAL_SHARED_LIBRARIES += libbase libhidlbase libutils android.hardware.power@1.2 liblog
+
+LOCAL_SHARED_LIBRARIES += android.hardware.power-V1-ndk
+LOCAL_SHARED_LIBRARIES += libbinder_ndk
+
 LOCAL_SRC_FILES += audio_perf.cpp
 
 ifeq ($(strip $(AUDIO_FEATURE_ENABLED_FM_TUNER_EXT)),true)
